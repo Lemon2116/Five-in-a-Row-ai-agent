@@ -96,7 +96,7 @@ class ExpectimaxAgent(BaseAgent):
         scores = {}
         for (y,x) in legal_moves:
             # Look around neighbors within Manhattan range 1–3
-            region = board[max(0,y-2):y+3, max(0,x-2):x+3]
+            region = board[max(0,y-1):y, max(0,x-1):x]
             count_stones = np.count_nonzero(region != EMPTY)
             scores[(x,y)] = count_stones  # more neighbors = better probability
 
