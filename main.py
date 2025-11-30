@@ -1,4 +1,4 @@
-from NPCagent import GomokuAgent, ExpectimaxAgent
+from NPCagent import BaseAgent, ExpectimaxAgent
 from five_in_a_row import Game
 
 mode = input("\nSelect mode:\n1) Human vs Human\n2) Human vs AI\n3) AI vs AI\n>> ")

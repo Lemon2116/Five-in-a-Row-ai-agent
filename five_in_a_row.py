@@ -96,9 +96,11 @@ class Board:
         return 0
 
 class Game:
-    def __init__(self, size=SIZE, window_size=WINDOW_SIZE, margin=MARGIN):
+    def __init__(self, size=SIZE, window_size=WINDOW_SIZE, margin=MARGIN,
+                 human=True, npc=None):  
         pygame.init()
-        pygame.display.set_caption("Five-in-a-Row - Click intersections to place stones")
+        pygame.display.set_caption("Five-in-a-Row + AI mode")
+
         self.screen = pygame.display.set_mode((window_size, window_size))
         self.clock = pygame.time.Clock()
 
@@ -106,11 +108,18 @@ class Game:
         self.margin = margin
         self.window_size = window_size
 
-        # compute cell spacing so grid fits nicely
+        self.human = human        # True = Human plays as BLACK
+        self.npc = npc            # None / one agent / [agent1, agent2]
+
+        # support multiple AI modes
+        self.ai_vs_ai = isinstance(npc, list) and len(npc) == 2
+        self.one_ai = isinstance(npc, object) and not self.ai_vs_ai
+
+        # same existing values...
         available = window_size - 2 * margin
-        self.cell = available / (size - 1)  # spacing between intersections
-        self.stone_radius = int(self.cell * 0.4)  # stone radius in pixels
-        self.click_tolerance = int(self.cell * 0.5)  # tolerance to accept a click near intersection
+        self.cell = available / (size - 1)
+        self.stone_radius = int(self.cell * 0.4)
+        self.click_tolerance = int(self.cell * 0.5)
 
         self.board = Board(size=size)
         self.current_player = BLACK
@@ -195,6 +204,14 @@ class Game:
 
         pygame.display.flip()
 
+    def place_and_check(self, x, y):
+        if self.board.place(x,y,self.current_player):
+            winner = self.board.check_win(x,y)
+            if winner:
+                self.winner = winner
+            else:
+                self.current_player = WHITE if self.current_player==BLACK else BLACK
+
     def handle_mouse_down(self, pos):
         if self.winner != 0:
             return  # no more moves after a win
@@ -228,14 +245,34 @@ class Game:
     def run(self):
         while self.running:
             self.clock.tick(FPS)
+
+            # ---------------- AI VS AI -----------------
+            if self.ai_vs_ai and self.winner == 0:
+                agent = self.npc[0] if self.current_player == BLACK else self.npc[1]
+                x,y = agent.getAction(self.board.grid)
+                self.place_and_check(x,y)
+                continue
+
+            # ---------------- HUMAN VS AI --------------
+            if self.one_ai and self.current_player == WHITE and self.winner == 0:
+                x,y = self.npc.getAction(self.board.grid)
+                self.place_and_check(x,y)
+                continue
+
+            # ---------------- HUMAN INPUT --------------
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
-                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:  # left click
-                    self.handle_mouse_down(event.pos)
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if self.human or self.current_player == BLACK:
+                        g=self.pixel_to_grid(*event.pos)
+                        if g:
+                            self.place_and_check(*g)
                 elif event.type == pygame.KEYDOWN:
                     self.handle_key(event.key)
+
             self.draw()
+
         pygame.quit()
         sys.exit()
 

@@ -1,11 +1,15 @@
 # ========================= NPCagent.py ============================
-import random
+import numpy as np
+from random import choice
 import math
 import copy
 
 BOARD_SIZE = 15
+EMPTY = 0
+BLACK = 1
+WHITE = 2
 
-class GomokuAgent:
+class BaseAgent:
     """
     Base class for all AI agents.
     All agents must implement getAction().
@@ -77,91 +81,36 @@ class GomokuAgent:
 # Expectimax Agent
 # =========================================================
 
-class ExpectimaxAgent(GomokuAgent):
-
-    def __init__(self, player_color, depth=2):
-        super().__init__(player_color)
-        self.depth = depth
-
-    # ----------------- API ENTRY -------------------------
+class ExpectimaxAgent(BaseAgent):
     def getAction(self, board):
-        """Return best move chosen via Expectimax with weighted chance nodes."""
-        _, move = self.expectimax(board, depth=self.depth, maximizing=True)
-        return move
-
-    # =====================================================
-    # EXPECTIMAX SEARCH
-    # =====================================================
-    def expectimax(self, board, depth, maximizing):
-        winner = self.check_win_state(board)
-        if winner or depth == 0:
-            return self.evaluate(board), None
-
-        legal_moves = self.nearby_weighted_moves(board)
-
-        if maximizing:
-            best_score = -math.inf
-            best_move = None
-
-            for _,move in legal_moves:
-                next_board = self.simulate_move(board, move, self.color)
-                score,_ = self.expectimax(next_board, depth-1, maximizing=False)
-                if score > best_score:
-                    best_score, best_move = score, move
-            return best_score, best_move
-
-        else:
-            # EXPECTATION NODE (Opponent)
-            values = []
-            for prob, move in legal_moves:
-                opponent = "black" if self.color=="white" else "white"
-                next_board = self.simulate_move(board, move, opponent)
-                score,_ = self.expectimax(next_board, depth-1, maximizing=True)
-                values.append(prob * score)
-            return sum(values), None
-
-
-    # ================= GAME STATE UTILS =================
-    def simulate_move(self, board, move, color):
-        new_board = copy.deepcopy(board)
-        r,c = move
-        new_board[r][c] = color
-        return new_board
-
-
-    def evaluate(self, board):
         """
-        Heuristic evaluation for win/loss, number of open threats, etc.
-        You CAN replace this with stronger scoring later.
+        Return (x,y) move.
+        Probability is higher near stones, very low elsewhere.
         """
-        winner = self.check_win_state(board)
-        if winner == self.color: return 99999
-        elif winner is not None: return -99999
-        else:
-            # Simple score: number of 2|3|4-length chains
-            return self.heuristic_score(board)
 
+        legal_moves = list(zip(*np.where(board == EMPTY)))
 
-    def heuristic_score(self, board):
-        score = 0
-        # You should later implement pattern-based scoring (OPEN-3, OPEN-4, etc.)
-        return score
+        # -----------------
+        # Compute proximity scores
+        # -----------------
+        scores = {}
+        for (y,x) in legal_moves:
+            # Look around neighbors within Manhattan range 1–3
+            region = board[max(0,y-2):y+3, max(0,x-2):x+3]
+            count_stones = np.count_nonzero(region != EMPTY)
+            scores[(x,y)] = count_stones  # more neighbors = better probability
 
+        # Normalize to probability
+        total = sum(scores.values())
+        if total == 0:  # opening or empty board
+            # place on center
+            s = board.shape[0]//2
+            return (s,s)
 
-    # -------- INLINE win check used by agent ------------
-    def check_win_state(self, board):
-        directions = [(1,0),(0,1),(1,1),(1,-1)]
-        for r in range(BOARD_SIZE):
-            for c in range(BOARD_SIZE):
-                if board[r][c]:
-                    color = board[r][c]
-                    for dr,dc in directions:
-                        count=1
-                        for i in range(1,5):
-                            nr,nc=r+dr*i,c+dc*i
-                            if 0<=nr<BOARD_SIZE and 0<=nc<BOARD_SIZE and board[nr][nc]==color:
-                                count+=1
-                            else:
-                                break
-                        if count>=5: return color
-        return None
+        # Weighted sampling like probability selection
+        moves, weights = zip(*scores.items())
+        weights = np.array(weights, dtype=float) / sum(weights)
+
+        # draw move according to distribution
+        idx = np.random.choice(len(moves), p=weights)
+        return moves[idx]
