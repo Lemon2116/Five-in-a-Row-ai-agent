@@ -239,9 +239,3 @@ class Game:
         pygame.quit()
         sys.exit()
 
-def main():
-    game = Game(size=SIZE, window_size=WINDOW_SIZE, margin=MARGIN)
-    game.run()
-
-if __name__ == "__main__":
-    main()
