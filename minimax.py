@@ -23,7 +23,7 @@ class MinimaxAgent:
         self.opponent = BLACK if player == WHITE else WHITE
         self.max_depth = max_depth
 
-    # ---------- Public API --------- -
+    # ---------- Public API ----------
 
     def get_move(self, grid):
         """
