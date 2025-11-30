@@ -113,7 +113,7 @@ class Game:
 
         # support multiple AI modes
         self.ai_vs_ai = isinstance(npc, list) and len(npc) == 2
-        self.one_ai = isinstance(npc, object) and not self.ai_vs_ai
+        self.one_ai = (npc is not None) and not self.ai_vs_ai
 
         # same existing values...
         available = window_size - 2 * margin
