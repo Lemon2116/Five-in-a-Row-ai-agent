@@ -1,16 +1,8 @@
-# five_in_a_row.py
-# Playable Five-in-a-Row (15x15) with mouse clicks (pygame)
-# Requirements: pygame, numpy
-#
-# Controls:
-#  - Left mouse click on an intersection -> place stone (if empty)
-#  - 'r' -> reset board
-#  - 'u' -> undo last move
-#  - 'q' or close window -> quit
-
+# five_in_a_row.py (fixed)
 import pygame
 import sys
 import numpy as np
+import random
 
 # Board constants
 SIZE = 15                 # intersections per side
@@ -32,6 +24,7 @@ class Board:
     """
     Board representation and basic operations.
     grid[y,x] with 0 <= x,y < SIZE
+    (The physical board state and history)
     """
     def __init__(self, size=SIZE):
         self.size = size
@@ -60,16 +53,94 @@ class Board:
         self.grid[y, x] = EMPTY
         return (x, y, player)
 
-    def is_full(self):
-        return not (self.grid == EMPTY).any()
+# --- GameState for AI Search / Terminal Checks ---
+class GameState:
+    """A minimal state representation for the AI search tree.
+    Coordinate convention used throughout: (x, y) == (col, row).
+    'board' here is a NumPy 2D array accessed as board[y, x].
+    """
+    def __init__(self, board, current_player, last_move=None):
+        # 'board' here is the NumPy grid array (shape: size x size)
+        self.board = board
+        self.current_player = current_player  # player to move next
+        # last_move stored as (x, y) OR None, representing the move that produced this state
+        self.last_move = last_move
+        self.size = board.shape[0]
 
-    def check_win(self, x, y):
+    def get_legal_actions(self):
+        """
+        Return empty positions (x, y) that are within Manhattan distance
+        <= 3 of ANY existing stone.
+        Much smaller action space → Expectimax becomes feasible.
+        """
+
+        board = self.board
+        size = board.shape[0]
+        stones = np.argwhere(board != EMPTY)
+
+        # Case 1: empty board → only center
+        if stones.shape[0] == 0:
+            mid = size // 2
+            return [(mid, mid)]
+
+        stone_y = stones[:, 0]
+        stone_x = stones[:, 1]
+
+        legal = []
+
+        # Iterate through ALL empty board cells
+        empty_y, empty_x = np.where(board == EMPTY)
+
+        for y, x in zip(empty_y, empty_x):
+            # Manhattan distance to nearest stone
+            dmin = np.min(np.abs(stone_y - y) + np.abs(stone_x - x))
+            if dmin <= 2:
+                legal.append((x, y))  # (x, y) = (col, row)
+
+        # Fallback: if no filtered moves (rare)
+        if len(legal) == 0:
+            return list(zip(empty_x.tolist(), empty_y.tolist()))
+
+        return legal
+
+    def generate_successor(self, action, player_color):
+        """Returns a new GameState after placing a stone at action (x, y)."""
+        if action is None:
+            raise ValueError("generate_successor called with None action")
+        x, y = action  # action is (x, y)
+        # copy board and place at [y, x]
+        new_board = self.board.copy()
+        new_board[y, x] = player_color
+
+        # next player is opponent
+        next_player = WHITE if player_color == BLACK else BLACK
+        return GameState(new_board, next_player, last_move=(x, y))
+
+    def is_terminal(self):
+        """
+        True if the LAST MOVE resulted in a win, or if the board is full.
+        Assumes self.last_move is set to the move that led to this state.
+        """
+        if self.last_move is not None:
+            x, y = self.last_move
+            # The player who just moved is the opposite of the current_player
+            last_mover = WHITE if self.current_player == BLACK else BLACK
+            if self.check_win(x, y, board_grid=self.board, player=last_mover):
+                 return True
+
+        # board full -> terminal (draw)
+        return not (self.board == EMPTY).any()
+
+    def check_win(self, x, y, board_grid=None, player=None):
         """
         After a move at (x,y), check if that move created a win.
+        Uses (x,y) == (col,row) convention: index grid[y, x].
         Returns player id (BLACK/WHITE) if win, else 0.
-        Efficient: only checks lines through (x,y).
         """
-        player = int(self.grid[y, x])
+        grid = board_grid if board_grid is not None else self.board
+
+        # Determine the player who just moved at (x,y)
+        player = player if player is not None else int(grid[y, x])
         if player == EMPTY:
             return 0
 
@@ -80,13 +151,13 @@ class Board:
             count = 1  # count the stone at (x,y)
             # check forward direction
             nx, ny = x + dx, y + dy
-            while 0 <= nx < self.size and 0 <= ny < self.size and self.grid[ny, nx] == player:
+            while 0 <= nx < self.size and 0 <= ny < self.size and grid[ny, nx] == player:
                 count += 1
                 nx += dx
                 ny += dy
             # check backward direction
             nx, ny = x - dx, y - dy
-            while 0 <= nx < self.size and 0 <= ny < self.size and self.grid[ny, nx] == player:
+            while 0 <= nx < self.size and 0 <= ny < self.size and grid[ny, nx] == player:
                 count += 1
                 nx -= dx
                 ny -= dy
@@ -95,9 +166,77 @@ class Board:
                 return player
         return 0
 
+class EvaluationFunction:
+    def __init__(self, agent_color):
+        self.agent_color = agent_color
+        self.opponent_color = WHITE if agent_color == BLACK else BLACK
+        self.size = SIZE
+
+        # Strong defensive bias
+        self.SELF_5 = 1e8
+        self.OPP_5 = -1e10
+        
+        self.SELF_4 = 5e5
+        self.OPP_4 = -5e7
+        
+        self.SELF_3 = 5e4
+        self.OPP_3 = -5e5
+        
+        self.SELF_2 = 2e3
+        self.OPP_2 = -4e3
+
+    def evaluate(self, board, player_color):
+        score = 0
+        directions = [(1,0), (0,1), (1,1), (1,-1)]
+
+        for y in range(self.size):
+            for x in range(self.size):
+                color = board[y][x]
+                if color == EMPTY:
+                    continue
+
+                for dx, dy in directions:
+                    # ---- SKIP if this is NOT the beginning of a line ----
+                    prev_x = x - dx
+                    prev_y = y - dy
+                    if 0 <= prev_x < self.size and 0 <= prev_y < self.size:
+                        if board[prev_y][prev_x] == color:
+                            continue
+
+                    # ---- Count only forward ----
+                    line = self._count_line(board, x, y, dx, dy, color)
+
+                    if color == player_color:
+                        if line >= 5:  score += self.SELF_5
+                        elif line == 4: score += self.SELF_4
+                        elif line == 3: score += self.SELF_3
+                        elif line == 2: score += self.SELF_2
+
+                    else:   # opponent
+                        if line >= 5:  score += self.OPP_5
+                        elif line == 4: score += self.OPP_4
+                        elif line == 3: score += self.OPP_3
+                        elif line == 2: score += self.OPP_2
+
+        return score
+
+    def _count_line(self, board, x, y, dx, dy, color):
+        count = 1
+        i = 1
+        while True:
+            nx = x + dx * i
+            ny = y + dy * i
+            if 0 <= nx < self.size and 0 <= ny < self.size and board[ny][nx] == color:
+                count += 1
+                i += 1
+            else:
+                break
+        return count
+
+
 class Game:
     def __init__(self, size=SIZE, window_size=WINDOW_SIZE, margin=MARGIN,
-                 human=True, npc=None):  
+                 human=True, npc=None):
         pygame.init()
         pygame.display.set_caption("Five-in-a-Row + AI mode")
 
@@ -108,14 +247,13 @@ class Game:
         self.margin = margin
         self.window_size = window_size
 
-        self.human = human        # True = Human plays as BLACK
+        self.human = human        # True = Human plays (Black by default)
         self.npc = npc            # None / one agent / [agent1, agent2]
 
         # support multiple AI modes
         self.ai_vs_ai = isinstance(npc, list) and len(npc) == 2
         self.one_ai = (npc is not None) and not self.ai_vs_ai
 
-        # same existing values...
         available = window_size - 2 * margin
         self.cell = available / (size - 1)
         self.stone_radius = int(self.cell * 0.4)
@@ -126,13 +264,13 @@ class Game:
         self.winner = 0
         self.running = True
 
+        # Optionally enforce initial center placement (if you want agent/human to always start center)
+        # If desired, uncomment:
+        # cx = cy = size // 2
+        # self.board.place(cx, cy, BLACK)
+        # self.current_player = WHITE
+
     def pixel_to_grid(self, px, py):
-        """
-        Convert pixel (px,py) to the nearest grid intersection (x,y).
-        Return (x,y) if within tolerance, else None.
-        """
-        # compute nearest grid index
-        # grid line i pixel coordinate: margin + i * cell
         fx = (px - self.margin) / self.cell
         fy = (py - self.margin) / self.cell
         gx = int(round(fx))
@@ -153,23 +291,17 @@ class Game:
         for i in range(self.size):
             x = int(self.margin + i * self.cell)
             y = int(self.margin + i * self.cell)
-            # vertical line
             pygame.draw.line(self.screen, LINE_COLOR, (x, self.margin), (x, self.window_size - self.margin), 2)
-            # horizontal line
             pygame.draw.line(self.screen, LINE_COLOR, (self.margin, y), (self.window_size - self.margin, y), 2)
 
-        # draw star points (optional, typical at certain intersections)
-        star_points = []
+        # draw star points
         if self.size >= 15:
-            # common star point positions for 15x15: 4, 7, 10 (0-based indices)
             pts = [3, 7, 11] if self.size == 15 else [self.size // 2]
             for rx in pts:
                 for ry in pts:
                     px = int(self.margin + rx * self.cell)
                     py = int(self.margin + ry * self.cell)
-                    star_points.append((px, py))
-            for (px, py) in star_points:
-                pygame.draw.circle(self.screen, LINE_COLOR, (px, py), 5)
+                    pygame.draw.circle(self.screen, LINE_COLOR, (px, py), 5)
 
         # draw stones
         for y in range(self.size):
@@ -182,7 +314,6 @@ class Game:
                         pygame.draw.circle(self.screen, BLACK_COLOR, (px, py), self.stone_radius)
                     else:
                         pygame.draw.circle(self.screen, WHITE_COLOR, (px, py), self.stone_radius)
-                        # add a thin border to white stones
                         pygame.draw.circle(self.screen, LINE_COLOR, (px, py), self.stone_radius, 2)
 
         # highlight last move
@@ -205,12 +336,21 @@ class Game:
         pygame.display.flip()
 
     def place_and_check(self, x, y):
-        if self.board.place(x,y,self.current_player):
-            winner = self.board.check_win(x,y)
+        """Places stone, updates history, and checks for a win."""
+        if self.board.place(x, y, self.current_player):
+            # Create a temporary GameState to check for win
+            # Note: GameState.check_win expects (x,y) coordinates (col,row)
+            temp_state = GameState(self.board.grid, 
+                                   WHITE if self.current_player == BLACK else BLACK,
+                                   last_move=(x, y))
+
+            # We pass player who just moved
+            winner = temp_state.check_win(x, y, board_grid=self.board.grid, player=self.current_player)
+
             if winner:
                 self.winner = winner
             else:
-                self.current_player = WHITE if self.current_player==BLACK else BLACK
+                self.current_player = WHITE if self.current_player == BLACK else BLACK
 
     def handle_mouse_down(self, pos):
         if self.winner != 0:
@@ -218,15 +358,7 @@ class Game:
         g = self.pixel_to_grid(*pos)
         if g is None:
             return
-        x, y = g
-        if self.board.place(x, y, self.current_player):
-            # check win
-            winner = self.board.check_win(x, y)
-            if winner != 0:
-                self.winner = winner
-            else:
-                # toggle player
-                self.current_player = WHITE if self.current_player == BLACK else BLACK
+        self.place_and_check(*g)
 
     def handle_key(self, key):
         if key == pygame.K_r:
@@ -242,6 +374,18 @@ class Game:
         elif key == pygame.K_q:
             self.running = False
 
+    def _agent_choose_fallback(self):
+        """Choose a fallback move: center if empty else random legal move."""
+        cx = cy = self.size // 2
+        if self.board.grid[cy, cx] == EMPTY:
+            return (cx, cy)
+        rows, cols = np.where(self.board.grid == EMPTY)
+        if len(rows) == 0:
+            return None
+        # return (x, y)
+        idx = random.randrange(len(rows))
+        return (int(cols[idx]), int(rows[idx]))
+
     def run(self):
         while self.running:
             self.clock.tick(FPS)
@@ -249,14 +393,30 @@ class Game:
             # ---------------- AI VS AI -----------------
             if self.ai_vs_ai and self.winner == 0:
                 agent = self.npc[0] if self.current_player == BLACK else self.npc[1]
-                x,y = agent.getAction(self.board.grid)
-                self.place_and_check(x,y)
+                try:
+                    move = agent.getAction(self.board.grid)
+                except Exception as e:
+                    print("Agent getAction threw exception:", e)
+                    move = None
+                if move is None:
+                    move = self._agent_choose_fallback()
+                if move:
+                    x, y = move
+                    self.place_and_check(x, y)
                 continue
 
             # ---------------- HUMAN VS AI --------------
             if self.one_ai and self.current_player == WHITE and self.winner == 0:
-                x,y = self.npc.getAction(self.board.grid)
-                self.place_and_check(x,y)
+                try:
+                    move = self.npc.getAction(self.board.grid)
+                except Exception as e:
+                    print("Agent getAction threw exception:", e)
+                    move = None
+                if move is None:
+                    move = self._agent_choose_fallback()
+                if move:
+                    x, y = move
+                    self.place_and_check(x, y)
                 continue
 
             # ---------------- HUMAN INPUT --------------
@@ -265,7 +425,7 @@ class Game:
                     self.running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if self.human or self.current_player == BLACK:
-                        g=self.pixel_to_grid(*event.pos)
+                        g = self.pixel_to_grid(*event.pos)
                         if g:
                             self.place_and_check(*g)
                 elif event.type == pygame.KEYDOWN:
