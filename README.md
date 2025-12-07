@@ -5,4 +5,4 @@ Minimax Agent:
 Expectimax Agent:
 Reinforcement Agent:
 # Sample Results
-![Expectisqr](path/to/image.jpg "Optional Title")
+![Expectisqr](img/Expectisqr.png "Example: Expectimax vs. Expectimax")
