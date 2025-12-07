@@ -6,3 +6,6 @@ Expectimax Agent:
 Reinforcement Agent:
 # Sample Results
 ![Expectisqr](img/Expectisqr.png "Example: Expectimax vs. Expectimax")
+# Winning Record
+![Record](img/Record.png "Record of different types of agents playing against each other")
+
