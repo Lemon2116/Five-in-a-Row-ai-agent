@@ -1,2 +1,8 @@
 # Five-in-a-Row-ai-agent
-This repository contains the Five-in-a-Row game and its ai NPC player to see how different construction of AI agents show differnt behaviors. 
+This repository contains the Five-in-a-Row game with designed AI players to evaluate and compare their behaviors. 
+# AI Agents
+Minimax Agent:
+Expectimax Agent:
+Reinforcement Agent:
+# Sample Results
+![Expectisqr](path/to/image.jpg "Optional Title")
