@@ -3,7 +3,6 @@ from minimax_modified import MinimaxAgentNew
 from minimax import MinimaxAgent
 from five_in_a_row import Game
 from randomAgent import RandomAgent
-from randomAgent import RandomAgent
 from five_in_a_row import Game, BLACK, WHITE
 import numpy as np
 from RLearning import RLAgent
