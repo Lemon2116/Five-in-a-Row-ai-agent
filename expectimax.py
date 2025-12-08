@@ -1,5 +1,6 @@
 import numpy as np
 from random import choice
+import time
 from five_in_a_row import GameState, EvaluationFunction
 
 EMPTY = 0
@@ -40,13 +41,34 @@ class ExpectimaxAgent(BaseAgent):
     # Top-level action selection
     # -----------------------------------------------------------
     def getAction(self, board):
+        startTime = time.time()
         state = GameState(board, current_player=self.player, last_move=None)
         legal = state.get_legal_actions()
+        size = board.shape[0]
 
-        # First move = center
+        # First move = Random 9×9 region around center
         if np.all(board == EMPTY):
-            mid = board.shape[0] // 2
-            return (mid, mid)
+
+            mid = size // 2
+            # 9×9 = radius 4 around center
+            radius = 4
+
+            # compute bounds
+            xmin = max(0, mid - radius)
+            xmax = min(size - 1, mid + radius)
+            ymin = max(0, mid - radius)
+            ymax = min(size - 1, mid + radius)
+
+            # collect all empty squares inside the 9×9 region
+            candidates = [
+                (y, x)
+                for y in range(ymin, ymax + 1)
+                for x in range(xmin, xmax + 1)
+                if board[y][x] == EMPTY
+            ]
+
+            # choose one randomly
+            return choice(candidates)
 
         best_score = float("-inf")
         best_action = None
@@ -58,8 +80,11 @@ class ExpectimaxAgent(BaseAgent):
             if score > best_score:
                 best_score = score
                 best_action = action
+        
+        elapsed = (time.time() - startTime) * 1000
+        print(f"ExpectimaxAgent took {elapsed:.2f} ms to decide.")
 
-        return best_action or choice(legal)
+        return best_action
 
     # -----------------------------------------------------------
     # Expectimax Recursion

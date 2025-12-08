@@ -1,4 +1,5 @@
 # five_in_a_row.py (fixed)
+from itertools import count
 import pygame
 import sys
 import numpy as np
@@ -70,7 +71,7 @@ class GameState:
     def get_legal_actions(self):
         """
         Return empty positions (x, y) that are within Manhattan distance
-        <= 3 of ANY existing stone.
+        <= 2 of ANY existing stone.
         Much smaller action space → Expectimax becomes feasible.
         """
 
@@ -78,10 +79,22 @@ class GameState:
         size = board.shape[0]
         stones = np.argwhere(board != EMPTY)
 
-        # Case 1: empty board → only center
+        # Case 1: empty board → return 9x9 region around center
         if stones.shape[0] == 0:
             mid = size // 2
-            return [(mid, mid)]
+            radius = 4
+            xmin = max(0, mid - radius)
+            xmax = min(size - 1, mid + radius)
+            ymin = max(0, mid - radius)
+            ymax = min(size - 1, mid + radius)
+            region = []
+
+            for y in range(ymin, ymax + 1):
+                for x in range(xmin, xmax + 1):
+                    if board[y][x] == EMPTY:
+                        region.append((x, y))  # (x, y) = (col, row)
+
+            return region
 
         stone_y = stones[:, 0]
         stone_x = stones[:, 1]
@@ -127,10 +140,14 @@ class GameState:
             last_mover = WHITE if self.current_player == BLACK else BLACK
             if self.check_win(x, y, board_grid=self.board, player=last_mover):
                  return True
+    
+        # Tie: no empty spaces left
+        if not np.any(self.board == EMPTY):
+            return True
 
         # board full -> terminal (draw)
-        return not (self.board == EMPTY).any()
-
+        return False
+    
     def check_win(self, x, y, board_grid=None, player=None):
         """
         After a move at (x,y), check if that move created a win.
@@ -172,18 +189,35 @@ class EvaluationFunction:
         self.opponent_color = WHITE if agent_color == BLACK else BLACK
         self.size = SIZE
 
-        # Strong defensive bias
-        self.SELF_5 = 1e8
-        self.OPP_5 = -1e10
-        
-        self.SELF_4 = 5e5
-        self.OPP_4 = -5e7
-        
-        self.SELF_3 = 5e4
-        self.OPP_3 = -5e5
-        
-        self.SELF_2 = 2e3
-        self.OPP_2 = -4e3
+        self.SELF_5 = float("5e8") 
+        self.OPP_5 = float("-inf")
+
+    def _pattern_score(self, my_count, open_ends, is_self):
+        # open_ends: 0 = dead, 1 = closed, 2 = open
+
+        if my_count >= 5:
+            return self.SELF_5 if is_self else self.OPP_5
+
+        # Scoring tables for self and opponent
+        if is_self:
+            table = {
+                (4,2): 5e7,   # open four
+                (4,1): 5e5,   # closed four
+                (3,2): 5e5,   # open three
+                (3,1): 1e4,   # closed three
+                (2,2): 500,   # open two
+                (2,1): 50     # closed two
+            }
+        else:
+            table = {
+                (4,2): -5e8,  # must block
+                (4,1): -5e6,
+                (3,2): -5e6,
+                (3,1): -5e4,
+                (2,2): -800,
+                (2,1): -50
+            }
+        return table.get((my_count, open_ends), 0)
 
     def evaluate(self, board, player_color):
         score = 0
@@ -204,34 +238,33 @@ class EvaluationFunction:
                             continue
 
                     # ---- Count only forward ----
-                    line = self._count_line(board, x, y, dx, dy, color)
+                    count, open_ends = self._count_line_with_open(board, x, y, dx, dy, color)
 
-                    if color == player_color:
-                        if line >= 5:  score += self.SELF_5
-                        elif line == 4: score += self.SELF_4
-                        elif line == 3: score += self.SELF_3
-                        elif line == 2: score += self.SELF_2
-
-                    else:   # opponent
-                        if line >= 5:  score += self.OPP_5
-                        elif line == 4: score += self.OPP_4
-                        elif line == 3: score += self.OPP_3
-                        elif line == 2: score += self.OPP_2
+                    is_self = (color == player_color)
+                    score += self._pattern_score(count, open_ends, is_self)
 
         return score
 
-    def _count_line(self, board, x, y, dx, dy, color):
-        count = 1
-        i = 1
-        while True:
-            nx = x + dx * i
-            ny = y + dy * i
-            if 0 <= nx < self.size and 0 <= ny < self.size and board[ny][nx] == color:
-                count += 1
-                i += 1
-            else:
-                break
-        return count
+    def _count_line_with_open(self, board, x, y, dx, dy, color):
+        count = 0
+        size = self.size
+
+        # Count forward
+        cx, cy = x, y
+        while 0 <= cx < size and 0 <= cy < size and board[cy][cx] == color:
+            count += 1
+            cx += dx
+            cy += dy
+        end1 = (0 <= cx < size and 0 <= cy < size and board[cy][cx] == EMPTY)
+        # Count backward
+        cx, cy = x - dx, y - dy
+        while 0 <= cx < size and 0 <= cy < size and board[cy][cx] == color:
+            count += 1
+            cx -= dx
+            cy -= dy
+        end2 = (0 <= cx < size and 0 <= cy < size and board[cy][cx] == EMPTY)
+        open_ends = end1 + end2  # 0, 1, or 2
+        return count, open_ends
 
 
 class Game:
@@ -328,6 +361,8 @@ class Game:
         if self.winner != 0:
             win_text = "Black wins!" if self.winner == BLACK else "White wins!"
             txt = font.render(win_text + "  (press 'r' to restart)", True, (10, 10, 10))
+        elif not np.any(self.board.grid == EMPTY):
+            txt = font.render("It's a tie!  (press 'r' to restart)", True, (10, 10, 10))
         else:
             turn_text = "Black" if self.current_player == BLACK else "White"
             txt = font.render(f"Turn: {turn_text}   (r reset, u undo, q quit)", True, (10, 10, 10))
